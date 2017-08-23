@@ -25,7 +25,7 @@ struct PSKOrange
     // as phase changes from the previous bit. a starting bit of 0 is assumed,
     // which is represented as a fixed-duration carrier establishing a
     // reference phase angle.
-    static constexpr float signal_phase = M_PI;
+    static constexpr float signal_phase = (float)M_PI;
 
     struct ElementEncoder
     {
@@ -43,12 +43,12 @@ struct PSKOrange
 
         struct Fader
         {
-            float theta = 0., delta = 0.;
+            float theta = 0.f, delta = 0.f;
 
             Fader() = default;
 
-            void fadein(int samples) { theta = 0.; delta = M_PI_2 / (float)samples; }
-            void fadeout(int samples) { theta = M_PI_2; delta = M_PI_2 / (float)samples; }
+            void fadein(int samples) { theta = 0.f; delta = (float)M_PI_2 / (float)samples; }
+            void fadeout(int samples) { theta = (float)M_PI_2; delta = (float)M_PI_2 / (float)samples; }
 
             float operator()() {
                 float z = sin(theta);
@@ -59,12 +59,12 @@ struct PSKOrange
 
         struct Osc
         {
-            float theta = 0., delta = 0.;
+            float theta = 0.f, delta = 0.f;
 
             Osc() = default;
 
             void reset(float phase) {
-                theta=phase; delta=(2. * M_PI * (float)freq) / (float)samplerate;
+                theta=phase; delta=(2.f * (float)M_PI * (float)freq) / (float)samplerate;
             }
 
             float operator()() {
@@ -130,11 +130,11 @@ struct PSKOrange
     {
         // when phase angles are being detected, angles below this threshold
         // are considered noise.
-        static constexpr float noise_floor = signal_phase * .01;
+        static constexpr float noise_floor = signal_phase * .01f;
 
         // when phase angles are being detected, angles below this threshold
         // are considered a 0 bit. Above this value they are considered a 1 bit.
-        static constexpr float value_threshold = signal_phase * .5;
+        static constexpr float value_threshold = signal_phase * .5f;
 
         bool decoded_bit = false;
 
@@ -173,10 +173,8 @@ struct PSKOrange
         // facilitates a half-wavelength scan of a whole-wavelength ringbuffer in order to determine phase angle
         struct PhaseDetector
         {
-            float iIntegrator = 0.;
-            float qIntegrator = 0.;
-            float phase = 0.; // resulting phase
-            float squelch = 0;
+            float phase = 0.f;
+            float squelch = 0.f;
 
             RingBuffer &sampler;
 
@@ -184,7 +182,7 @@ struct PSKOrange
 
             void process()
             {
-                iIntegrator = qIntegrator = 0.;
+                float iIntegrator = 0.f, qIntegrator = 0.f;
 
                 for(uint i=0; i<sampler.channelSize; i++) {
                     float sample = sampler.ring[ sampler.readIndex ];
@@ -220,7 +218,7 @@ struct PSKOrange
                 // Calculate the arctangent in the first quadrant
                 float bxy_a = ::fabs( b * x * y );
                 float num = bxy_a + y * y;
-                float atan_1q =  num / (x * x + bxy_a + num + (float).0001); // .0001 to fix dbz and nan issue
+                float atan_1q =  num / (x * x + bxy_a + num + .0001f); // .0001 to fix dbz and nan issue
 
                 // Translate it to the proper quadrant
                 uint32_t uatan_2q = (ux_s ^ uy_s) | (uint32_t &)atan_1q;
@@ -259,14 +257,14 @@ struct PSKOrange
                 {
                     channel_lock = channel_lock > 0 ? 0 : -channel_monitor; // alternately clear or lock channel
                 }
-                if(channel_lock > 0) { sample_count = 0.; } // ignore squelches during carrier lock
+                if(channel_lock > 0) { sample_count = 0; } // ignore squelches during carrier lock
                 channel_monitor = 0;
             }
         };
 
         // detects phase inversions between a carrier channel and the data channel
         struct InversionDetector {
-            float phase = 0.;
+            float phase = 0.f;
             int channel = 0; // 0 == none, 1 == A, 2 == B, -1 == A falling edge, -2 == B falling edge
             int latch = -2; // -2 == undefined, -1 == NOISE, 0 == FALSE, 1 == TRUE
 
@@ -278,7 +276,7 @@ struct PSKOrange
                     channelA(ca), channelB(cb)
             {}
 
-            void reset() { phase = 0.; channel = 0; latch = -2; }
+            void reset() { phase = 0.f; channel = 0; latch = -2; }
 
             void process()
             {
@@ -297,7 +295,7 @@ struct PSKOrange
                     float phase_delta = ::fabs(phase_e - phase_c);
 
                     // smooth the maximums of the phase differences in assist in detection.
-                    phase = ::max(phase, phase_delta) * .4 + phase * .6;
+                    phase = ::max(phase, phase_delta) * .4f + phase * .6f;
                 }
                 else if(channel < 0) // switching channels, determine bit value and latch it
                 {
@@ -305,7 +303,7 @@ struct PSKOrange
                     // otherwise indicate a noise event.
                     latch = phase > noise_floor ? (phase > value_threshold ? +1 : 0) : -1;
                     channel = 0; // indicate no channel is active
-                    phase = 0.; // reset active phase
+                    phase = 0.f; // reset active phase
                 }
             }
 
@@ -365,7 +363,7 @@ struct PSKOrange
             const std::function<void(int)> &noisefn)
         {
             int bitnum = 0;
-            float* pSample = 0;
+            float* pSample = nullptr;
 
             while((pSample = readfn()) != nullptr)
             {
