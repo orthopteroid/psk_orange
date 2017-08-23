@@ -136,31 +136,27 @@ struct PSKOrange
         // are considered a 0 bit. Above this value they are considered a 1 bit.
         static constexpr float value_threshold = signal_phase * .5f;
 
+        // with a single cycle in the decoder ring buffer and knowing the samplerate and
+        // frequency we can compute the ending offsets for expected quadrants.
+        static constexpr int q1End = (int)((float)samplerate / (float)freq * .25);
+        static constexpr int q2End = (int)((float)samplerate / (float)freq * .5);
+        static constexpr int q3End = (int)((float)samplerate / (float)freq * .75);
+
+        static constexpr uint ringSize = (uint)((float)samplerate / (float)freq);
+        static constexpr uint channelSize = ringSize / 2; // each channel looks at half the ring, in sequence
+
         bool decoded_bit = false;
 
         // a ring buffer sized to fit a single wavelength of the element frequency
         struct RingBuffer
         {
             std::vector<float> ring;
-            uint ringSize, channelSize;
             int writeIndex; // destination index for new data
-            int readIndex; // index for reading data from buffer. each channel reads half the buffer. in sqeuence.
-            int q1End, q2End, q3End; // ending offsets for the atan quadrants of an ideal, theta-0-starting waveform.
+            int readIndex; // index for reading data from buffer. each channel reads half the buffer. in sequence.
 
-            void reset()
-            {
-                ringSize = (uint)((float)samplerate / (float)freq);
-                ring.reserve(ringSize);
-                writeIndex = 0;
+            explicit RingBuffer() : ring(ringSize) {}
 
-                channelSize = ringSize / 2; // each channel looks at half the ring, in sequence
-
-                // with a single cycle in the ring and knowing the samplerate and
-                // frequency we can compute the ending offsets for expected quadrants.
-                q1End = (int)((float)samplerate / (float)freq * .25);
-                q2End = (int)((float)samplerate / (float)freq * .5);
-                q3End = (int)((float)samplerate / (float)freq * .75);
-            }
+            void reset() { writeIndex = 0; }
 
             void process(float value)
             {
@@ -178,22 +174,23 @@ struct PSKOrange
 
             RingBuffer &sampler;
 
-            PhaseDetector(RingBuffer &s) : sampler(s) {}
+            explicit PhaseDetector(RingBuffer &s) : sampler(s) {}
 
             void process()
             {
                 float iIntegrator = 0.f, qIntegrator = 0.f;
 
-                for(uint i=0; i<sampler.channelSize; i++) {
+                // integrate and normalize
+                for(uint i=0; i<channelSize; i++) {
                     float sample = sampler.ring[ sampler.readIndex ];
 
-                    iIntegrator += (sampler.readIndex < sampler.q2End) ? sample : -sample;
-                    qIntegrator += (sampler.readIndex >= sampler.q1End) && (sampler.readIndex < sampler.q3End) ? sample : -sample;
+                    iIntegrator += (sampler.readIndex < q2End) ? sample : -sample;
+                    qIntegrator += (sampler.readIndex >= q1End) && (sampler.readIndex < q3End) ? sample : -sample;
 
-                    if(++sampler.readIndex == sampler.ringSize) { sampler.readIndex = 0; }
+                    if(++sampler.readIndex == ringSize) { sampler.readIndex = 0; }
                 }
-                iIntegrator /= (float)sampler.channelSize; // normalize
-                qIntegrator /= (float)sampler.channelSize; // normalize
+                iIntegrator /= 1.f * (float)channelSize;
+                qIntegrator /= 1.f * (float)channelSize;
 
                 phase = quick_atan2( (float)qIntegrator, (float)iIntegrator );
                 squelch = sqrt( iIntegrator * iIntegrator + qIntegrator * qIntegrator );
