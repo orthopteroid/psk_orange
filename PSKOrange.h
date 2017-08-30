@@ -141,10 +141,11 @@ struct PSKOrange
             std::vector<float> ring;
             int writeIndex; // destination index for new data
             int readIndex; // index for reading data from buffer. each channel reads half the buffer. in sequence.
+            int theta;
 
             explicit RingBuffer() : ring(ringSize) {}
 
-            void reset() { writeIndex = 0; }
+            void reset() { writeIndex = theta = 0; }
 
             void process(float value)
             {
@@ -181,11 +182,11 @@ struct PSKOrange
                 // integrate and normalize
                 for(int i=0; i<channelSize; i++) {
                     float sample = sampler.ring[ sampler.readIndex ];
-
-                    iIntegrator += (sampler.readIndex < q2End) ? sample : -sample;
-                    qIntegrator += (sampler.readIndex >= q1End) && (sampler.readIndex < q3End) ? sample : -sample;
-
                     if(++sampler.readIndex == ringSize) { sampler.readIndex = 0; }
+
+                    iIntegrator += (sampler.theta < q2End) ? sample : -sample;
+                    qIntegrator += (sampler.theta >= q1End) && (sampler.theta < q3End) ? sample : -sample;
+                    if(++sampler.theta == q4End) { sampler.theta = 0; }
                 }
                 iIntegrator /= 1.f * (float)channelSize;
                 qIntegrator /= 1.f * (float)channelSize;
@@ -291,9 +292,8 @@ struct PSKOrange
                     float phase_c = carrierDetector.channel_lock == 1 ? channelA.phase : channelB.phase;
                     float phase_e = channel == 1 ? channelA.phase : channelB.phase;
 
-                    // use abs to recover from small quadrature errors that can make
-                    // phase angle jump by +/-PI (due to tolerances in atan2? not sure...)
-                    float phase_delta = ::fabs(phase_e - phase_c);
+                    // ignore quadrants, compute abs of difference
+                    float phase_delta = ::fabs(::fabs(phase_e) - ::fabs(phase_c));
 
                     // smooth the maximums of the phase differences in assist in detection.
                     phase = ::max(phase, phase_delta) * .4f + phase * .6f;
@@ -330,7 +330,6 @@ struct PSKOrange
         void process(float value)
         {
             ringBuffer.process(value);
-
             channelB.process();
             channelA.process();
             carrierDetector.process();
