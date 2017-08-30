@@ -159,6 +159,8 @@ struct PSKOrange
         {
             float phase = 0.f;
             float squelch = 0.f;
+            float iIntegrator = 0.f, qIntegrator = 0.f;
+
             // compute indices for where the quadrants are in the waveform
             static constexpr int q1End = (int)((float)samplerate / (float)freq / 4.f);
             static constexpr int q2End = (int)((float)samplerate / (float)freq / 2.f);
@@ -174,7 +176,7 @@ struct PSKOrange
 
             void process()
             {
-                float iIntegrator = 0.f, qIntegrator = 0.f;
+                iIntegrator = qIntegrator = 0.f;
 
                 // integrate and normalize
                 for(int i=0; i<channelSize; i++) {
