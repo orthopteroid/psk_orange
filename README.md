@@ -11,7 +11,7 @@ And this is the ascii of the decoded string:
 
 The terminating bit (sometimes 1, sometimes 0) is a remanant of how the decoding works - a 0 designates no bit-delta between the last bit and the ending carrier (which is always phase 0). I think it can be ignored when decoding.
 
-The first 5 bits of the letter H (in Hello World) is shown below. What you are looking at is a long 150 cycle (@500hz) carrier followed by several 50 cycle (@500hz) elements. The phase changes between consecutive elements is the bit-delta-coding.
+The first 5 bits of the letter H (in Hello World) is shown below. What you are looking at is a long 150 cycle (@500hz) carrier followed by several 50 cycle (@500hz) elements. The top row is the actual encoded audio, the second row is the results of the phase-change detection routine and shows spikes where there are encoded data - small spikes indicate no phase-change and large spikes to indicate a phase-change. Decoding always starts in the 0 state and then uses the phase changes to generate a stream of bits. What is encoded here is the bit pattern `00010`:
 ![First 5 bits of Hello World](hello-world-first-5-bits.png)
 
 When the phase between elements remains the same this is an encoding for no bit-change. ![delta-0](hello-world-delta-0.png)
