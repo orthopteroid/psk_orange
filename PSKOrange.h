@@ -128,24 +128,12 @@ struct PSKOrange
 
     struct ElementDecoder
     {
-        // when phase angles are being detected, angles below this threshold
-        // are considered noise.
-        static constexpr float noise_floor = signal_phase * .01f;
+        // ring buffer size should be multiple waveform lengths to prevent small values
+        // of (i,q) being calculated during element attenuation.
+        static constexpr int ringSize = (int)(4.f * (float)samplerate / (float)freq);
 
-        // when phase angles are being detected, angles below this threshold
-        // are considered a 0 bit. Above this value they are considered a 1 bit.
-        static constexpr float value_threshold = signal_phase * .5f;
-
-        // with a single cycle in the decoder ring buffer and knowing the samplerate and
-        // frequency we can compute the ending offsets for expected quadrants.
-        static constexpr int q1End = (int)((float)samplerate / (float)freq * .25);
-        static constexpr int q2End = (int)((float)samplerate / (float)freq * .5);
-        static constexpr int q3End = (int)((float)samplerate / (float)freq * .75);
-
-        static constexpr uint ringSize = (uint)((float)samplerate / (float)freq);
-        static constexpr uint channelSize = ringSize / 2; // each channel looks at half the ring, in sequence
-
-        bool decoded_bit = false;
+        // psk_orange de/encodes bit transitions. This is the value of the last bit decoded.
+        bool last_decoded_bit = false;
 
         // a ring buffer sized to fit a single wavelength of the element frequency
         struct RingBuffer
@@ -166,11 +154,19 @@ struct PSKOrange
             }
         };
 
-        // facilitates a half-wavelength scan of a whole-wavelength ringbuffer in order to determine phase angle
+        // facilitates a half-wavelength scan of a ringbuffer in order to determine phase angle
         struct PhaseDetector
         {
             float phase = 0.f;
             float squelch = 0.f;
+            // compute indices for where the quadrants are in the waveform
+            static constexpr int q1End = (int)((float)samplerate / (float)freq / 4.f);
+            static constexpr int q2End = (int)((float)samplerate / (float)freq / 2.f);
+            static constexpr int q3End = (int)(3.f * (float)samplerate / (float)freq / 4.f);
+            static constexpr int q4End = (int)((float)samplerate / (float)freq);
+
+            // each channel scans half the ring
+            static constexpr int channelSize = ringSize / 2;
 
             RingBuffer &sampler;
 
@@ -181,7 +177,7 @@ struct PSKOrange
                 float iIntegrator = 0.f, qIntegrator = 0.f;
 
                 // integrate and normalize
-                for(uint i=0; i<channelSize; i++) {
+                for(int i=0; i<channelSize; i++) {
                     float sample = sampler.ring[ sampler.readIndex ];
 
                     iIntegrator += (sampler.readIndex < q2End) ? sample : -sample;
@@ -192,7 +188,7 @@ struct PSKOrange
                 iIntegrator /= 1.f * (float)channelSize;
                 qIntegrator /= 1.f * (float)channelSize;
 
-                phase = quick_atan2( (float)qIntegrator, (float)iIntegrator );
+                phase = quick_atan2( qIntegrator, iIntegrator );
                 squelch = sqrt( iIntegrator * iIntegrator + qIntegrator * qIntegrator );
             }
 
@@ -265,6 +261,12 @@ struct PSKOrange
             int channel = 0; // 0 == none, 1 == A, 2 == B, -1 == A falling edge, -2 == B falling edge
             int latch = -2; // -2 == undefined, -1 == NOISE, 0 == FALSE, 1 == TRUE
 
+            // during phase angle detection, establish a value below which is considered noise.
+            static constexpr float noise_floor = signal_phase * .01f;
+
+            // during phase angle detection, establish a threshold for 0/1-ness.
+            static constexpr float value_threshold = signal_phase * .4f;
+
             PhaseDetector &channelA, &channelB;
             CarrierDetector &carrierDetector;
 
@@ -277,7 +279,7 @@ struct PSKOrange
 
             void process()
             {
-                if(carrierDetector.detected() == false) { return; } // wait for carrier
+                if(!carrierDetector.detected()) { return; } // wait for carrier
 
                 // detect channel and switchover
                 channel = channelA.betterThan(channelB) ? 1 : (channelB.betterThan(channelA) ? 2 : -channel);
@@ -338,7 +340,7 @@ struct PSKOrange
             ringBuffer.reset();
             inversionDetector.reset();
             carrierDetector.reset();
-            decoded_bit = false; // corresponding to the state where the carrier is not yet detected
+            last_decoded_bit = false; // corresponding to the state where the carrier is not yet detected
         }
 
         // return a decoded bit (0 or 1) or a value indicating no-value (-2) or noisy-signal (-1)
@@ -349,8 +351,8 @@ struct PSKOrange
             int invert = inversionDetector.read();
             if(invert < 0) { return invert; } // indicate invalid or noise
 
-            if(invert == 1) decoded_bit = !decoded_bit; // decode delta
-            return decoded_bit ? 1 : 0;
+            if(invert == 1) last_decoded_bit = !last_decoded_bit; // decode delta
+            return last_decoded_bit ? 1 : 0;
         }
 
         // read from a source until nullptr and send back any detected bits or noise events.
