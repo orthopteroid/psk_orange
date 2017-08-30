@@ -31,16 +31,6 @@ struct PSKOrange
     {
         static constexpr float amplification = .95; // to be safe from saturation
 
-        struct Stepper
-        {
-            int samples = 0;
-
-            Stepper() = default;
-
-            void reset(int cycles) { samples = cycles * (float)samplerate / (float)freq; }
-            bool complete() { return !(samples-- > 0); }
-        } stepper;
-
         struct Fader
         {
             float theta = 0.f, delta = 0.f;
@@ -59,13 +49,13 @@ struct PSKOrange
 
         struct Osc
         {
-            float theta = 0.f, delta = 0.f;
+            float theta = 0.f;
+
+            static constexpr float delta = (2.f * (float)M_PI * (float)freq) / (float)samplerate;
 
             Osc() = default;
 
-            void reset(float phase) {
-                theta=phase; delta=(2.f * (float)M_PI * (float)freq) / (float)samplerate;
-            }
+            void reset(float phase) { theta=phase; }
 
             float operator()() {
                 float z = sin(theta);
@@ -76,39 +66,38 @@ struct PSKOrange
 
         //////////
 
-        ElementEncoder() {}
+        ElementEncoder() = default;
 
         // send a psk element of the specified phase that lasts for the specified number of cycles
+        template<int cycles_total>
         void transmit(
             const std::function<void(float)> &senderfn,
-            bool signal,
-            int cycles_total
+            bool signal
         )
         {
-            int cycles_fade = 10;
-            int cycles_body = cycles_total - 20;
+            static constexpr int cycles_fade = 10;
+            static constexpr int cycles_body = cycles_total - 20;
+            static constexpr int samples_fade = (int)((float)cycles_fade * (float)samplerate / (float)freq);
+            static constexpr int samples_body = (int)((float)cycles_body * (float)samplerate / (float)freq);
 
             osc.reset(signal ? PSKOrange::signal_phase : 0);
 
-            stepper.reset(cycles_fade);
-            fader.fadein(stepper.samples);
-            while(!stepper.complete()) { senderfn( amplification * fader() * osc() ); }
+            fader.fadein(samples_fade);
+            for(int i=0; i<samples_fade; i++) { senderfn( amplification * fader() * osc() ); }
 
-            stepper.reset(cycles_body);
-            while(!stepper.complete()) { senderfn( amplification * osc() ); }
+            for(int i=0; i<samples_body; i++) { senderfn( amplification * osc() ); }
 
-            stepper.reset(cycles_fade);
-            fader.fadeout(stepper.samples);
-            while(!stepper.complete()) { senderfn( amplification * fader() * osc() ); }
+            fader.fadeout(samples_fade);
+            for(int i=0; i<samples_fade; i++) { senderfn( amplification * fader() * osc() ); }
         }
 
-        // converts the bitsequence into a series of value-inversions which are transmitted as a series of phase-inversions
+        // converts the bitsequence into a series of bit-inversions which are transmitted as a series of phase-inversions
         void encode(
             const std::function<void(float)> &senderfn,
             const std::function<bool*(void)> &bitfn
         )
         {
-            transmit(senderfn, false, carrier_cycles); // always starts with carrier phase
+            transmit<carrier_cycles>(senderfn, false); // always starts with carrier phase
 
             bool invert = false;
             bool prevBit = false; // ie carrier phase angle
@@ -116,11 +105,11 @@ struct PSKOrange
             while((pBit = bitfn()) != nullptr)
             {
                 if(*pBit != prevBit) { invert = !invert; } // detect bit transition
-                transmit(senderfn, invert, element_cycles);
+                transmit<element_cycles>(senderfn, invert);
                 prevBit = *pBit;
             }
 
-            transmit(senderfn, false, carrier_cycles); // always ends with carrier phase
+            transmit<carrier_cycles>(senderfn, false); // always ends with carrier phase
         }
     };
 
@@ -155,12 +144,12 @@ struct PSKOrange
             }
         };
 
-        // facilitates a half-wavelength scan of a ringbuffer in order to determine phase angle
+        // determines the phase angle of the waveform in a ringbuffer
         struct PhaseDetector
         {
+            float iIntegrator = 0.f, qIntegrator = 0.f; // state variables, for diagnostics
             float phase = 0.f;
             float squelch = 0.f;
-            float iIntegrator = 0.f, qIntegrator = 0.f;
 
             // compute indices for where the quadrants are in the waveform
             static constexpr int q1End = (int)((float)samplerate / (float)freq / 4.f);
@@ -212,7 +201,7 @@ struct PSKOrange
                 auto q = (float)( ( ~ux_s & uy_s ) >> 29 | ux_s >> 30 );
 
                 // Calculate the arctangent in the first quadrant
-                float bxy_a = ::fabs( b * x * y );
+                float bxy_a = fabsf( b * x * y );
                 float num = bxy_a + y * y;
                 float atan_1q =  num / (x * x + bxy_a + num + .0001f); // .0001 to fix dbz and nan issue
 
@@ -223,6 +212,9 @@ struct PSKOrange
 
         };
 
+        // identifies a carrier by it's length, then either locks the carrier to that channel (in the
+        // case of the leading carrier of a bit-sequence) or releases it (in the case of the trailing
+        // carrier of a bit-sequence)
         struct CarrierDetector {
             int channel_monitor = 0; // 0 == none, 1 == A, 2 == B, -1 == A falling edge, -2 == B falling edge
             int channel_lock = 0; // 0 == none, 1 == A, 2 == B
@@ -244,16 +236,20 @@ struct PSKOrange
             {
                 sample_count++;
 
-                // detect channel and switchover
+                // trailing-edge detection of stronger channel
                 channel_monitor = channelA.betterThan(channelB) ? 1 : (channelB.betterThan(channelA) ? 2 : -channel_monitor);
+                if(channel_monitor >= 0) { return; } // no edge yet
 
-                if(channel_monitor >= 0) { return; } // no switchover yet
-
+                // lock the carrier to this channel if there has been no other channel transitions
+                // (ie an uninterrupted carrier of the correct length)
                 if(sample_count >= samples_in_carrier)
                 {
-                    channel_lock = channel_lock > 0 ? 0 : -channel_monitor; // alternately clear or lock channel
+                    // clear or lock channel, depending if this is a leading or a trailing carrier
+                    channel_lock = channel_lock > 0 ? 0 : -channel_monitor;
                 }
                 if(channel_lock > 0) { sample_count = 0; } // ignore squelches during carrier lock
+
+                // clear the edge-detected state
                 channel_monitor = 0;
             }
         };
@@ -264,11 +260,8 @@ struct PSKOrange
             int channel = 0; // 0 == none, 1 == A, 2 == B, -1 == A falling edge, -2 == B falling edge
             int latch = -2; // -2 == undefined, -1 == NOISE, 0 == FALSE, 1 == TRUE
 
-            // during phase angle detection, establish a value below which is considered noise.
-            static constexpr float noise_floor = signal_phase * .01f;
-
-            // during phase angle detection, establish a threshold for 0/1-ness.
-            static constexpr float value_threshold = signal_phase * .4f;
+            static constexpr float noise_floor = signal_phase * .01f; // set a noise tolerance
+            static constexpr float value_threshold = signal_phase * .4f; // set a threshold for 0/1-ness.
 
             PhaseDetector &channelA, &channelB;
             CarrierDetector &carrierDetector;
@@ -284,7 +277,7 @@ struct PSKOrange
             {
                 if(!carrierDetector.detected()) { return; } // wait for carrier
 
-                // detect channel and switchover
+                // discriminate stronger channel and it's trailing-edge
                 channel = channelA.betterThan(channelB) ? 1 : (channelB.betterThan(channelA) ? 2 : -channel);
 
                 if(channel > 0) // a channel is active
@@ -292,11 +285,13 @@ struct PSKOrange
                     float phase_c = carrierDetector.channel_lock == 1 ? channelA.phase : channelB.phase;
                     float phase_e = channel == 1 ? channelA.phase : channelB.phase;
 
-                    // ignore quadrants, compute abs of difference
-                    float phase_delta = ::fabs(::fabs(phase_e) - ::fabs(phase_c));
+                    // because the signalling phase angle is pi and atan2 is not exact the calculated
+                    // phase angle may oscillate between quadrant 2 and 3 - meaning an oscillation of +/- pi.
+                    // so, use the inner fabs to stay in the upper quadrants.
+                    float phase_delta_abs = fabsf(fabsf(phase_e) - fabsf(phase_c));
 
-                    // smooth the maximums of the phase differences in assist in detection.
-                    phase = ::max(phase, phase_delta) * .4f + phase * .6f;
+                    // smooth the maximums of the phase differences
+                    phase = max(phase, phase_delta_abs) * .4f + phase * .6f;
                 }
                 else if(channel < 0) // switching channels, determine bit value and latch it
                 {
