@@ -100,44 +100,6 @@ int main()
         }
     }
 
-    // read and generate details
-    if(false)
-    {
-        ifstream inFile;
-        inFile.open("out.bin", ios::binary);
-
-        ofstream detailsFile;
-        detailsFile.open("details.bin", ios::binary);
-
-        PSKOrange<element_cycles,carrier_cycles,freq,samplerate>::ElementDecoder elem;
-        elem.reset();
-
-        while(!inFile.eof())
-        {
-            float sample = read_s16LE(inFile);
-            elem.process(sample);
-
-            write_s16LE(detailsFile, sample);
-
-            // normalize to (-1,+1)
-            write_s16LE(detailsFile, elem.inversionDetector.phase * M_1_PI);
-            write_s16LE(detailsFile, elem.channelA.phase * M_1_PI);
-            write_s16LE(detailsFile, elem.channelB.phase * M_1_PI);
-
-            write_s16LE(detailsFile, elem.channelA.iIntegrator);
-            write_s16LE(detailsFile, elem.channelA.qIntegrator);
-            write_s16LE(detailsFile, elem.channelA.squelch);
-
-            write_s16LE(detailsFile, elem.channelB.iIntegrator);
-            write_s16LE(detailsFile, elem.channelB.qIntegrator);
-            write_s16LE(detailsFile, elem.channelB.squelch);
-
-        }
-
-        inFile.close();
-        detailsFile.close();
-    }
-
     // full message string
     if(true)
     {
@@ -147,17 +109,25 @@ int main()
             outFile.open("out.bin", ios::binary);
             PSKOrange<element_cycles,carrier_cycles,freq,samplerate>::ElementEncoder elem;
 
-            const char* message = "HEL";
+            const char* message = "Hello World!";
+
+            std::ostream &console = cout;
 
             elem.encode(
                 [&outFile](float v) { write_s16LE( outFile, v ); },
-                [&message](void) -> bool*
+                [&message,&console](void) -> bool*
                 {
                     static int i = 0;
                     static bool bit = false;
                     if(message[i/8] == 0) { return nullptr; }
                     bit = (bool)(message[i/8] & (1 << (i%8)));
+
+                    console << bit << std::flush;
+
                     i++;
+
+                    if(i%8 == 0) { console << ' ' << std::flush; }
+
                     return &bit;
                 }
             );
@@ -166,6 +136,7 @@ int main()
 
             //system("/usr/bin/aplay -f cd out.bin"); // enable to play audio!
         }
+        cout << std::endl;
 
         // read and decode
         {
@@ -187,14 +158,52 @@ int main()
                     {
                         static int i = 0;
                         static char c = 0;
-                        if(bit) { c |= (char)(1 << (i%8)); }
-                        if(++i%8 == 0) { console << c << std::flush; c = 0; }
+                        //if(bit) { c |= (char)(1 << (i%8)); }
+                        //if(++i%8 == 0) { console << c << std::flush; c = 0; }
+                        console << bit << std::flush;
+                        if(++i%8 == 0) { console << ' ' << std::flush; }
                     },
-                    [&console](int bit) -> void { console << "(E" << bit << ')'; }
+                    [&console](int bit) -> void { /*console << "(E" << bit << ')';*/ }
             );
 
             inFile.close();
         }
+        cout << std::endl;
+    }
+
+    // read and generate details
+    if(true)
+    {
+        ifstream inFile;
+        inFile.open("out.bin", ios::binary);
+
+        ofstream detailsFile;
+        detailsFile.open("details.bin", ios::binary);
+
+        PSKOrange<element_cycles,carrier_cycles,freq,samplerate>::ElementDecoder elem;
+        elem.reset();
+
+        while(!inFile.eof())
+        {
+            float sample = read_s16LE(inFile);
+            elem.process(sample);
+
+            write_s16LE(detailsFile, sample);
+            write_s16LE(detailsFile, elem.inversionDetector.phase * M_1_PI);
+
+            write_s16LE(detailsFile, elem.channelA.phase * M_1_PI);
+            write_s16LE(detailsFile, elem.channelA.iIntegrator);
+            write_s16LE(detailsFile, elem.channelA.qIntegrator);
+            write_s16LE(detailsFile, elem.channelA.squelch);
+
+            write_s16LE(detailsFile, elem.channelB.phase * M_1_PI);
+            write_s16LE(detailsFile, elem.channelB.iIntegrator);
+            write_s16LE(detailsFile, elem.channelB.qIntegrator);
+            write_s16LE(detailsFile, elem.channelB.squelch);
+        }
+
+        inFile.close();
+        detailsFile.close();
     }
 
     return 0;
