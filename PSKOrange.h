@@ -128,13 +128,13 @@ struct PSKOrange
         struct RingBuffer
         {
             std::vector<float> ring;
-            int writeIndex; // destination index for new data
-            int readIndex; // index for reading data from buffer. each channel reads half the buffer. in sequence.
-            int theta;
+            int writeIndex = 0; // destination index for new data
+            int readIndex = 0; // index for reading data from buffer. each channel reads half the buffer. in sequence.
+            int theta = 0; // phase angle of the current waveform sample, as a sample index.
 
             explicit RingBuffer() : ring(ringSize) {}
 
-            void reset() { writeIndex = theta = 0; }
+            void reset() { writeIndex = readIndex = theta = 0; }
 
             void process(float value)
             {
