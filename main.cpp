@@ -134,7 +134,7 @@ int main()
 
             outFile.close();
 
-            //system("/usr/bin/aplay -f cd out.bin"); // enable to play audio!
+            //system("/usr/bin/aplay -f cd -r 22050 out.bin"); // enable to play audio!
         }
         cout << std::endl;
 
