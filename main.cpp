@@ -38,6 +38,61 @@ float read_s16LE(istream &stream)
 
 //////////////////////////
 
+struct MathUtil
+{
+    typedef float Valuetype;
+    typedef float Angletype;
+
+    static constexpr float PI = (float)M_PI;
+    static constexpr float PI_2 = (float)M_PI_2;
+
+    // Approximates atan2(y, x) with maximum error of 0.1620 degrees
+    // https://stackoverflow.com/a/14100975/968363 - with dbz and nan fix and renormalization to (-pi,+pi)
+    static float atan2( float y, float x )
+    {
+        static const uint32_t sign_mask = 0x80000000;
+        static const float b = 0.596227f;
+
+        // Extract the sign bits
+        uint32_t ux_s  = sign_mask & (uint32_t &)x;
+        uint32_t uy_s  = sign_mask & (uint32_t &)y;
+
+        // Determine the quadrant offset
+        auto q = (float)( ( ~ux_s & uy_s ) >> 29 | ux_s >> 30 );
+
+        // Calculate the arctangent in the first quadrant
+        float bxy_a = fabsf( b * x * y );
+        float num = bxy_a + y * y;
+        float atan_1q =  num / (x * x + bxy_a + num + .0001f); // .0001 to fix dbz and nan issue
+
+        // Translate it to the proper quadrant
+        uint32_t uatan_2q = (ux_s ^ uy_s) | (uint32_t &)atan_1q;
+        return (q + (float &)uatan_2q) * (float)M_PI_2 - (float)M_PI; // [0,4) to [0,2pi) to (-pi,+pi)
+    }
+
+    static float sqrt(float in)
+    {
+        return ::sqrt(in);
+    }
+
+    static float abs(float in)
+    {
+        return ::fabsf(in);
+    }
+
+    static float max(float a, float b)
+    {
+        return ::max(a,b);
+    }
+
+    static float sin(float in)
+    {
+        return ::sin(in);
+    }
+};
+
+//////////////////////////
+
 int main()
 {
     srand48(int(time(NULL)));
@@ -57,7 +112,7 @@ int main()
 
             bool q[] = {1,0,1,0,1,0};
 
-            PSKOrange<element_cycles,carrier_cycles,freq,samplerate>::ElementEncoder encoder;
+            PSKOrange<element_cycles,carrier_cycles,freq,samplerate,MathUtil>::ElementEncoder encoder;
             encoder.encode(
                 [&outFile](float v) { write_s16LE( outFile, v ); },
                 [&q](void) -> bool* { static int i = 0; return i < 6 ? &q[i++] : nullptr; }
@@ -76,7 +131,7 @@ int main()
             std::deque<bool> bitseq;
             std::ostream &console = cout; // lower cout into local context for use in lambda
 
-            PSKOrange<element_cycles,carrier_cycles,freq,samplerate>::ElementDecoder decoder;
+            PSKOrange<element_cycles,carrier_cycles,freq,samplerate,MathUtil>::ElementDecoder decoder;
             decoder.decode(
                 [&inFile](void) -> float*
                 {
@@ -109,7 +164,7 @@ int main()
 
             std::ostream &console = cout; // lower cout into local context for use in lambda
 
-            PSKOrange<element_cycles,carrier_cycles,freq,samplerate>::ElementEncoder encoder;
+            PSKOrange<element_cycles,carrier_cycles,freq,samplerate,MathUtil>::ElementEncoder encoder;
             encoder.encode(
                 [&outFile](float v) { write_s16LE( outFile, v ); },
                 [&message,&console](void) -> bool*
@@ -140,7 +195,7 @@ int main()
 
             std::ostream &console = cout; // lower cout into local context for use in lambda
 
-            PSKOrange<element_cycles,carrier_cycles,freq,samplerate>::ElementDecoder decoder;
+            PSKOrange<element_cycles,carrier_cycles,freq,samplerate,MathUtil>::ElementDecoder decoder;
             decoder.decode(
                     [&inFile](void) -> float*
                     {
@@ -171,7 +226,7 @@ int main()
         ofstream detailsFile;
         detailsFile.open("details.bin", ios::binary);
 
-        PSKOrange<element_cycles,carrier_cycles,freq,samplerate>::ElementDecoder decoder;
+        PSKOrange<element_cycles,carrier_cycles,freq,samplerate,MathUtil>::ElementDecoder decoder;
         while(!inFile.eof())
         {
             float sample = read_s16LE(inFile);

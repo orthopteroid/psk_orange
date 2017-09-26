@@ -9,7 +9,6 @@
 #define PSK_ORANGE_PSKORANGE_H
 
 #include <stdint.h>
-#include <cmath>
 #include <deque>
 #include <vector>
 #include <functional>
@@ -18,30 +17,30 @@ using namespace std;
 
 //////////////
 
-template<int element_cycles, int carrier_cycles, int freq, int samplerate>
+template<int element_cycles, int carrier_cycles, int freq, int samplerate, class M>
 struct PSKOrange
 {
+    typedef typename M::Valuetype Valuetype;
+
     // pskorange uses a delta-bitcode to send bits. deltas are signalled
     // as phase changes from the previous bit. a starting bit of 0 is assumed,
     // which is represented as a fixed-duration carrier establishing a
     // reference phase angle.
-    static constexpr float signal_phase = (float)M_PI;
+    static constexpr float signal_phase = M::PI;
 
     struct ElementEncoder
     {
-        static constexpr float amplification = .95; // to be safe from saturation
-
         struct Fader
         {
             float theta = 0.f, delta = 0.f;
 
             Fader() = default;
 
-            void fadein(int samples) { theta = 0.f; delta = (float)M_PI_2 / (float)samples; }
-            void fadeout(int samples) { theta = (float)M_PI_2; delta = (float)M_PI_2 / (float)samples; }
+            void fadein(int samples) { theta = 0.f; delta = M::PI_2 / (float)samples; }
+            void fadeout(int samples) { theta = M::PI_2; delta = M::PI_2 / (float)samples; }
 
             float operator()() {
-                float z = sin(theta);
+                float z = M::sin(theta);
                 theta += delta;
                 return z;
             }
@@ -51,14 +50,14 @@ struct PSKOrange
         {
             float theta = 0.f;
 
-            static constexpr float delta = (2.f * (float)M_PI * (float)freq) / (float)samplerate;
+            static constexpr float delta = (2.f * M::PI * (float)freq) / (float)samplerate;
 
             Osc() = default;
 
             void reset(float phase) { theta=phase; }
 
             float operator()() {
-                float z = sin(theta);
+                float z = M::sin(theta);
                 theta += delta;
                 return z;
             }
@@ -71,29 +70,29 @@ struct PSKOrange
         // send a psk element of the specified phase that lasts for the specified number of cycles
         template<int cycles_total>
         void transmit(
-            const std::function<void(float)> &senderfn,
+            const std::function<void(Valuetype)> &senderfn,
             bool signal
         )
         {
             static constexpr int cycles_fade = 10;
             static constexpr int cycles_body = cycles_total - 20;
-            static constexpr int samples_fade = (int)((float)cycles_fade * (float)samplerate / (float)freq);
-            static constexpr int samples_body = (int)((float)cycles_body * (float)samplerate / (float)freq);
+            static constexpr int samples_fade = (cycles_fade * samplerate) / freq;
+            static constexpr int samples_body = (cycles_body * samplerate) / freq;
 
             osc.reset(signal ? PSKOrange::signal_phase : 0);
 
             fader.fadein(samples_fade);
-            for(int i=0; i<samples_fade; i++) { senderfn( amplification * fader() * osc() ); }
+            for(int i=0; i<samples_fade; i++) { senderfn( fader() * osc() ); }
 
-            for(int i=0; i<samples_body; i++) { senderfn( amplification * osc() ); }
+            for(int i=0; i<samples_body; i++) { senderfn( osc() ); }
 
             fader.fadeout(samples_fade);
-            for(int i=0; i<samples_fade; i++) { senderfn( amplification * fader() * osc() ); }
+            for(int i=0; i<samples_fade; i++) { senderfn( fader() * osc() ); }
         }
 
         // converts the bitsequence into a series of bit-inversions which are transmitted as a series of phase-inversions
         void encode(
-            const std::function<void(float)> &senderfn,
+            const std::function<void(Valuetype)> &senderfn,
             const std::function<bool*(void)> &bitfn
         )
         {
@@ -119,7 +118,7 @@ struct PSKOrange
     {
         // ring buffer size should be multiple waveform lengths to prevent small values
         // of (i,q) being calculated during element attenuation.
-        static constexpr int ringSize = (int)(4.f * (float)samplerate / (float)freq);
+        static constexpr int ringSize = ((4 * samplerate) / freq);
 
         // psk_orange de/encodes bit transitions. This is the value of the last bit decoded.
         bool last_decoded_bit = false;
@@ -127,7 +126,7 @@ struct PSKOrange
         // a ring buffer sized to fit a single wavelength of the element frequency
         struct RingBuffer
         {
-            std::vector<float> ring;
+            std::vector<Valuetype> ring;
             int writeIndex = 0; // destination index for new data
             int readIndex = 0; // index for reading data from buffer. each channel reads half the buffer. in sequence.
             int theta = 0; // phase angle of the current waveform sample, as a sample index.
@@ -152,10 +151,10 @@ struct PSKOrange
             float squelch = 0.f;
 
             // compute indices for where the quadrants are in the waveform
-            static constexpr int q1End = (int)((float)samplerate / (float)freq / 4.f);
-            static constexpr int q2End = (int)((float)samplerate / (float)freq / 2.f);
-            static constexpr int q3End = (int)(3.f * (float)samplerate / (float)freq / 4.f);
-            static constexpr int q4End = (int)((float)samplerate / (float)freq);
+            static constexpr int q4End = samplerate / freq;
+            static constexpr int q1End = q4End / 4;
+            static constexpr int q2End = 2 * q1End;
+            static constexpr int q3End = 3 * q1End;
 
             // each channel scans half the ring
             static constexpr int channelSize = ringSize / 2;
@@ -170,45 +169,21 @@ struct PSKOrange
 
                 // integrate and normalize
                 for(int i=0; i<channelSize; i++) {
-                    float sample = sampler.ring[ sampler.readIndex ];
+                    Valuetype sample = sampler.ring[ sampler.readIndex ];
                     if(++sampler.readIndex == ringSize) { sampler.readIndex = 0; }
 
                     iIntegrator += (sampler.theta < q2End) ? sample : -sample;
                     qIntegrator += (sampler.theta >= q1End) && (sampler.theta < q3End) ? sample : -sample;
                     if(++sampler.theta == q4End) { sampler.theta = 0; }
                 }
-                iIntegrator /= 1.f * (float)channelSize;
-                qIntegrator /= 1.f * (float)channelSize;
+                iIntegrator /= channelSize;
+                qIntegrator /= channelSize;
 
-                phase = quick_atan2( qIntegrator, iIntegrator );
-                squelch = sqrt( iIntegrator * iIntegrator + qIntegrator * qIntegrator );
+                phase = M::atan2( qIntegrator, iIntegrator );
+                squelch = M::sqrt( iIntegrator * iIntegrator + qIntegrator * qIntegrator );
             }
 
-            bool betterThan(PhaseDetector& other) { return squelch > 2. * other.squelch; }
-
-            // Approximates atan2(y, x) with maximum error of 0.1620 degrees
-            // https://stackoverflow.com/a/14100975/968363 - with dbz and nan fix and renormalization to (-pi,+pi)
-            float quick_atan2( float y, float x )
-            {
-                static const uint32_t sign_mask = 0x80000000;
-                static const float b = 0.596227f;
-
-                // Extract the sign bits
-                uint32_t ux_s  = sign_mask & (uint32_t &)x;
-                uint32_t uy_s  = sign_mask & (uint32_t &)y;
-
-                // Determine the quadrant offset
-                auto q = (float)( ( ~ux_s & uy_s ) >> 29 | ux_s >> 30 );
-
-                // Calculate the arctangent in the first quadrant
-                float bxy_a = fabsf( b * x * y );
-                float num = bxy_a + y * y;
-                float atan_1q =  num / (x * x + bxy_a + num + .0001f); // .0001 to fix dbz and nan issue
-
-                // Translate it to the proper quadrant
-                uint32_t uatan_2q = (ux_s ^ uy_s) | (uint32_t &)atan_1q;
-                return (q + (float &)uatan_2q) * (float)M_PI_2 - (float)M_PI; // [0,4) to [0,2pi) to (-pi,+pi)
-            }
+            bool betterThan(PhaseDetector& other) { return squelch > 2 * other.squelch; }
 
         };
 
@@ -260,8 +235,8 @@ struct PSKOrange
             int channel = 0; // 0 == none, 1 == A, 2 == B, -1 == A falling edge, -2 == B falling edge
             int latch = -2; // -2 == undefined, -1 == NOISE, 0 == FALSE, 1 == TRUE
 
-            static constexpr float noise_floor = signal_phase * .01f; // set a noise tolerance
-            static constexpr float value_threshold = signal_phase * .4f; // set a threshold for 0/1-ness.
+            static constexpr Valuetype noise_floor = signal_phase / 100; // set a noise tolerance
+            static constexpr Valuetype value_threshold = (signal_phase / 5) * 2; // set a threshold for 0/1-ness.
 
             PhaseDetector &channelA, &channelB;
             CarrierDetector &carrierDetector;
@@ -288,10 +263,10 @@ struct PSKOrange
                     // because the signalling phase angle is pi and atan2 is not exact the calculated
                     // phase angle may oscillate between quadrant 2 and 3 - meaning an oscillation of +/- pi.
                     // so, use the inner fabs to stay in the upper quadrants.
-                    float phase_delta_abs = fabsf(fabsf(phase_e) - fabsf(phase_c));
+                    float phase_delta_abs = M::abs(M::abs(phase_e) - M::abs(phase_c));
 
                     // smooth the maximums of the phase differences
-                    phase = max(phase, phase_delta_abs) * .4f + phase * .6f;
+                    phase = M::max(phase, phase_delta_abs) * .4f + phase * .6f;
                 }
                 else if(channel < 0) // switching channels, determine bit value and latch it
                 {
@@ -318,11 +293,11 @@ struct PSKOrange
         ElementDecoder() :
                 channelA(ringBuffer),
                 channelB(ringBuffer),
-                carrierDetector(channelA, channelB, carrier_cycles * (float)samplerate / (float)freq),
+                carrierDetector(channelA, channelB, (carrier_cycles * samplerate) / freq),
                 inversionDetector(channelA, channelB, carrierDetector)
         { }
 
-        void process(float value)
+        void process(Valuetype value)
         {
             ringBuffer.process(value);
             channelB.process();
@@ -353,12 +328,12 @@ struct PSKOrange
 
         // read from a source until nullptr and send back any detected bits or noise events.
         void decode(
-            const std::function<float*(void)> &readfn,
+            const std::function<Valuetype*(void)> &readfn,
             const std::function<void(bool)> &bitfn,
             const std::function<void(int)> &noisefn)
         {
             int bitnum = 0;
-            float* pSample = nullptr;
+            Valuetype* pSample = nullptr;
 
             while((pSample = readfn()) != nullptr)
             {
