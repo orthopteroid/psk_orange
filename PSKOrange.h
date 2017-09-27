@@ -144,6 +144,10 @@ struct PSKOrange
         };
 
         // determines the phase angle of the waveform in a ringbuffer
+        // ringbuffer is sized to fit an integer number of waveforms at current sample rate.
+        // Comment from: https://stackoverflow.com/a/27546385/968363
+        // Eqn N.20 of: http://kom.aau.dk/group/05gr506/report/node29.html
+        // Other work: https://www.embedded.com/design/configurable-systems/4212086/DSP-Tricks--Frequency-demodulation-algorithms-
         struct PhaseDetector
         {
             float iIntegrator = 0.f, qIntegrator = 0.f; // state variables, for diagnostics
@@ -260,9 +264,10 @@ struct PSKOrange
                     float phase_c = carrierDetector.channel_lock == 1 ? channelA.phase : channelB.phase;
                     float phase_e = channel == 1 ? channelA.phase : channelB.phase;
 
-                    // because the signalling phase angle is pi and atan2 is not exact the calculated
+                    // because the signalling phase angle is pi and atan2 is not exact, the calculated
                     // phase angle may oscillate between quadrant 2 and 3 - meaning an oscillation of +/- pi.
-                    // so, use the inner fabs to stay in the upper quadrants.
+                    // so, we make liberal use of fabs to stay in the upper quadrants.
+                    // Similar to Angle Unwrapping? See Fig N.4 of: http://kom.aau.dk/group/05gr506/report/node29.html
                     float phase_delta_abs = M::abs(M::abs(phase_e) - M::abs(phase_c));
 
                     // smooth the maximums of the phase differences
