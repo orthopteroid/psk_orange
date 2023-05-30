@@ -86,17 +86,18 @@ int main()
     const int carrier_cycles = 3 * element_cycles;
     const int freq = 500;
     const int samplerate = 22050;
+    const char* szAudio = "audio22k@500hz-int16le.bin";
 
 #if defined(TARGET_TESTENCODE)
     const char* message = "Hello World!";
-    cout << "encode message \"" << message << "\" to out.bin" << std::endl;
-    cout << "play audio with: /usr/bin/aplay -f cd -r 22050 out.bin" << std::endl;
+    cout << "encode message \"" << message << "\" to " << szAudio << std::endl;
+    cout << "play audio with: /usr/bin/aplay -f cd -r " << samplerate << " " << szAudio<< std::endl;
 
     std::ostream &console = cout; // lower cout into local context for use in lambda
 
     // synthesis
     ofstream outFile;
-    outFile.open("out.bin", ios::binary);
+    outFile.open(szAudio, ios::binary);
 
     PSKOrange<element_cycles,carrier_cycles,freq,samplerate,MathUtil>::ElementEncoder encoder;
     encoder.encode(
@@ -119,12 +120,12 @@ int main()
     outFile.close();
     cout << std::endl;
 #elif defined(TARGET_DUMPDECODE)
-    cout << "read out.bin and print the decoded pattern as big endian bytes" << std::endl;
+    cout << "read " << szAudio << " and print the decoded pattern as big endian bytes" << std::endl;
     std::ostream &console = cout; // lower cout into local context for use in lambda
 
     // read and decode
     ifstream inFile;
-    inFile.open("out.bin", ios::binary);
+    inFile.open(szAudio, ios::binary);
 
     PSKOrange<element_cycles,carrier_cycles,freq,samplerate,MathUtil>::ElementDecoder decoder;
     decoder.decode(
@@ -146,10 +147,10 @@ int main()
     inFile.close();
     cout << std::endl;
 #elif defined(TARGET_DEBUGDECODE)
-    cout << "read out.bin and generate binary file details.bin for debugging" << std::endl;
+    cout << "read " << szAudio << " and generate binary file details.bin for debugging" << std::endl;
 
     ifstream inFile;
-    inFile.open("out.bin", ios::binary);
+    inFile.open(szAudio, ios::binary);
 
     ofstream detailsFile;
     detailsFile.open("details.bin", ios::binary);
