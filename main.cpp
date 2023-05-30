@@ -67,28 +67,13 @@ struct MathUtil
 
         // Translate it to the proper quadrant
         uint32_t uatan_2q = (ux_s ^ uy_s) | (uint32_t &)atan_1q;
-        return (q + (float &)uatan_2q) * (float)M_PI_2 - (float)M_PI; // [0,4) to [0,2pi) to (-pi,+pi)
+        return (q + (float &)uatan_2q) * PI_2 - PI; // [0,4) to [0,2pi) to (-pi,+pi)
     }
 
-    static float sqrt(float in)
-    {
-        return ::sqrt(in);
-    }
-
-    static float abs(float in)
-    {
-        return ::fabsf(in);
-    }
-
-    static float max(float a, float b)
-    {
-        return ::max(a,b);
-    }
-
-    static float sin(float in)
-    {
-        return ::sin(in);
-    }
+    static float sqrt(float in) { return ::sqrt(in); }
+    static float abs(float in) { return ::fabsf(in); }
+    static float max(float a, float b) { return ::max(a,b); }
+    static float sin(float in) { return ::sin(in); }
 };
 
 //////////////////////////
@@ -97,158 +82,98 @@ int main()
 {
     srand48(int(time(NULL)));
 
-    const int element_cycles = 50;
+    const int element_cycles = 10;
     const int carrier_cycles = 3 * element_cycles;
     const int freq = 500;
     const int samplerate = 22050;
 
-    // basic test
-    if(false)
+#if defined(TARGET_TESTENCODE)
+    const char* message = "Hello World!";
+    cout << "encode message \"" << message << "\" to out.bin" << std::endl;
+    cout << "play audio with: /usr/bin/aplay -f cd -r 22050 out.bin" << std::endl;
+
+    std::ostream &console = cout; // lower cout into local context for use in lambda
+
+    // synthesis
+    ofstream outFile;
+    outFile.open("out.bin", ios::binary);
+
+    PSKOrange<element_cycles,carrier_cycles,freq,samplerate,MathUtil>::ElementEncoder encoder;
+    encoder.encode(
+        [&outFile](float v) { write_s16LE( outFile, v ); },
+        [&message,&console](void) -> bool*
+        {
+            static uint i = 0; // todo: bit count might overflow for long messages
+            static bool bit = false;
+
+            if(message[i/8] == 0) { return nullptr; }
+            bit = (bool)(message[i/8] & (1 << (7- i%8))); // 7- reverses the bits
+
+            console << bit << (++i%8 == 0 ? " " : "" ) << std::flush;
+            return &bit;
+        }
+    );
+
+    outFile.close();
+    cout << std::endl;
+#elif defined(TARGET_DUMPDECODE)
+    cout << "read out.bin and print the decoded bit pattern" << std::endl;
+    std::ostream &console = cout; // lower cout into local context for use in lambda
+
+    // read and decode
+    ifstream inFile;
+    inFile.open("out.bin", ios::binary);
+
+    PSKOrange<element_cycles,carrier_cycles,freq,samplerate,MathUtil>::ElementDecoder decoder;
+    decoder.decode(
+            [&inFile](void) -> float*
+            {
+                static float sample; // simple hack that allows us to signal end-of-stream
+                return inFile.eof() ? nullptr : &(sample = read_s16LE(inFile));
+            },
+            [&console](bool bit) -> void
+            {
+                static uint i = 0; // todo: bit count might overflow for long messages
+                console << bit << (++i%8 == 0 ? " " : "" ) << std::flush;
+            },
+            [&console](int bit) -> void { /*console << "(E" << bit << ')';*/ } // todo: fix
+    );
+
+    inFile.close();
+    cout << std::endl;
+#elif defined(TARGET_DEBUGDECODE)
+    cout << "read out.bin and generate binary file details.bin for debugging" << std::endl;
+
+    ifstream inFile;
+    inFile.open("out.bin", ios::binary);
+
+    ofstream detailsFile;
+    detailsFile.open("details.bin", ios::binary);
+
+    PSKOrange<element_cycles,carrier_cycles,freq,samplerate,MathUtil>::ElementDecoder decoder;
+    while(!inFile.eof())
     {
-        // synthesis
-        {
-            ofstream outFile;
-            outFile.open("out.bin", ios::binary);
+        float sample = read_s16LE(inFile);
+        decoder.process(sample);
 
-            bool q[] = {1,0,1,0,1,0};
+        write_s16LE(detailsFile, sample);
+        write_s16LE(detailsFile, decoder.inversionDetector.phase * M_1_PI);
 
-            PSKOrange<element_cycles,carrier_cycles,freq,samplerate,MathUtil>::ElementEncoder encoder;
-            encoder.encode(
-                [&outFile](float v) { write_s16LE( outFile, v ); },
-                [&q](void) -> bool* { static int i = 0; return i < 6 ? &q[i++] : nullptr; }
-            );
+        write_s16LE(detailsFile, decoder.channelA.phase * M_1_PI);
+        write_s16LE(detailsFile, decoder.channelA.iIntegrator);
+        write_s16LE(detailsFile, decoder.channelA.qIntegrator);
+        write_s16LE(detailsFile, decoder.channelA.squelch);
 
-            outFile.close();
-
-            //system("/usr/bin/aplay -f cd -r 22050 out.bin"); // enable to play audio!
-        }
-
-        // read and decode
-        {
-            ifstream inFile;
-            inFile.open("out.bin", ios::binary);
-
-            std::deque<bool> bitseq;
-            std::ostream &console = cout; // lower cout into local context for use in lambda
-
-            PSKOrange<element_cycles,carrier_cycles,freq,samplerate,MathUtil>::ElementDecoder decoder;
-            decoder.decode(
-                [&inFile](void) -> float*
-                {
-                    static float sample;
-                    return inFile.eof() ? nullptr : &(sample = read_s16LE(inFile));
-                },
-                [&inFile,&bitseq](bool bit) -> void { bitseq.push_back(bit); },
-                [&console](int bit) -> void { /* static int x = 0; console << "error in bit " << bit << " " << x++ << std::endl; */ } // todo: fix
-            );
-
-            // drop last bit as it is the transition from last element to the ending carrier
-            bitseq.pop_back();
-
-            for(auto iter = bitseq.begin(); iter != bitseq.end(); iter++) { cout << *iter << " "; }
-            cout << std::endl;
-
-            inFile.close();
-        }
+        write_s16LE(detailsFile, decoder.channelB.phase * M_1_PI);
+        write_s16LE(detailsFile, decoder.channelB.iIntegrator);
+        write_s16LE(detailsFile, decoder.channelB.qIntegrator);
+        write_s16LE(detailsFile, decoder.channelB.squelch);
     }
 
-    // full message string
-    if(true)
-    {
-        // synthesis
-        {
-            ofstream outFile;
-            outFile.open("out.bin", ios::binary);
-
-            const char* message = "Hello World!";
-
-            std::ostream &console = cout; // lower cout into local context for use in lambda
-
-            PSKOrange<element_cycles,carrier_cycles,freq,samplerate,MathUtil>::ElementEncoder encoder;
-            encoder.encode(
-                [&outFile](float v) { write_s16LE( outFile, v ); },
-                [&message,&console](void) -> bool*
-                {
-                    static int i = 0;
-                    static bool bit = false;
-
-                    if(message[i/8] == 0) { return nullptr; }
-                    bit = (bool)(message[i/8] & (1 << (i%8)));
-
-                    console << bit << std::flush;
-                    if(++i%8 == 0) { console << ' ' << std::flush; }
-
-                    return &bit;
-                }
-            );
-
-            outFile.close();
-
-            //system("/usr/bin/aplay -f cd -r 22050 out.bin"); // enable to play audio!
-        }
-        cout << std::endl;
-
-        // read and decode
-        {
-            ifstream inFile;
-            inFile.open("out.bin", ios::binary);
-
-            std::ostream &console = cout; // lower cout into local context for use in lambda
-
-            PSKOrange<element_cycles,carrier_cycles,freq,samplerate,MathUtil>::ElementDecoder decoder;
-            decoder.decode(
-                    [&inFile](void) -> float*
-                    {
-                        static float sample; // simple hack that allows us to signal end-of-stream
-                        return inFile.eof() ? nullptr : &(sample = read_s16LE(inFile));
-                    },
-                    [&console](bool bit) -> void
-                    {
-                        static int i = 0;
-
-                        console << bit << std::flush;
-                        if(++i%8 == 0) { console << ' ' << std::flush; }
-                    },
-                    [&console](int bit) -> void { /*console << "(E" << bit << ')';*/ } // todo: fix
-            );
-
-            inFile.close();
-        }
-        cout << std::endl;
-    }
-
-    // read and generate details
-    if(true)
-    {
-        ifstream inFile;
-        inFile.open("out.bin", ios::binary);
-
-        ofstream detailsFile;
-        detailsFile.open("details.bin", ios::binary);
-
-        PSKOrange<element_cycles,carrier_cycles,freq,samplerate,MathUtil>::ElementDecoder decoder;
-        while(!inFile.eof())
-        {
-            float sample = read_s16LE(inFile);
-            decoder.process(sample);
-
-            write_s16LE(detailsFile, sample);
-            write_s16LE(detailsFile, decoder.inversionDetector.phase * M_1_PI);
-
-            write_s16LE(detailsFile, decoder.channelA.phase * M_1_PI);
-            write_s16LE(detailsFile, decoder.channelA.iIntegrator);
-            write_s16LE(detailsFile, decoder.channelA.qIntegrator);
-            write_s16LE(detailsFile, decoder.channelA.squelch);
-
-            write_s16LE(detailsFile, decoder.channelB.phase * M_1_PI);
-            write_s16LE(detailsFile, decoder.channelB.iIntegrator);
-            write_s16LE(detailsFile, decoder.channelB.qIntegrator);
-            write_s16LE(detailsFile, decoder.channelB.squelch);
-        }
-
-        inFile.close();
-        detailsFile.close();
-    }
-
+    inFile.close();
+    detailsFile.close();
+#elif defined(TARGET_ENCODE)
+#elif defined(TARGET_DECODE)
+#endif
     return 0;
 }
