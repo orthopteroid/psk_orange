@@ -335,9 +335,9 @@ struct PSKOrange
         void decode(
             const std::function<Valuetype*(void)> &readfn,
             const std::function<void(bool)> &bitfn,
-            const std::function<void(int)> &noisefn)
+            const std::function<void(uint)> &noisefn)
         {
-            int bitnum = 0;
+            uint bitnum = 0;
             Valuetype* pSample = nullptr;
 
             while((pSample = readfn()) != nullptr)
