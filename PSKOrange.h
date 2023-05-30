@@ -107,8 +107,6 @@ struct PSKOrange
                 transmit<element_cycles>(senderfn, invert);
                 prevBit = *pBit;
             }
-
-            transmit<carrier_cycles>(senderfn, false); // always ends with carrier phase
         }
     };
 
