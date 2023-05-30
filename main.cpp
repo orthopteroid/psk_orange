@@ -136,7 +136,7 @@ int main()
                 static uint i = 0; // todo: bit count might overflow for long messages
                 console << bit << (++i%8 == 0 ? " " : "" ) << std::flush;
             },
-            [&console](int bit) -> void { /*console << "(E" << bit << ')';*/ } // todo: fix
+            [&console](uint bit) -> void { /*console << "(E" << bit << ')';*/ } // todo: fix
     );
 
     inFile.close();
@@ -173,7 +173,9 @@ int main()
     inFile.close();
     detailsFile.close();
 #elif defined(TARGET_ENCODE)
+    ;
 #elif defined(TARGET_DECODE)
+    ;
 #endif
     return 0;
 }
