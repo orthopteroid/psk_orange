@@ -107,7 +107,9 @@ int main()
             static bool bit = false;
 
             if(message[i/8] == 0) { return nullptr; }
-            bit = (bool)(message[i/8] & (1 << (7- i%8))); // 7- reverses the bits
+
+            // encode smallest bits first = big endian = network order
+            bit = (bool)(message[i/8] & (1 << i%8));
 
             console << bit << (++i%8 == 0 ? " " : "" ) << std::flush;
             return &bit;
@@ -117,7 +119,7 @@ int main()
     outFile.close();
     cout << std::endl;
 #elif defined(TARGET_DUMPDECODE)
-    cout << "read out.bin and print the decoded bit pattern" << std::endl;
+    cout << "read out.bin and print the decoded pattern as big endian bytes" << std::endl;
     std::ostream &console = cout; // lower cout into local context for use in lambda
 
     // read and decode
@@ -134,6 +136,8 @@ int main()
             [&console](bool bit) -> void
             {
                 static uint i = 0; // todo: bit count might overflow for long messages
+
+                // decode smallest bits first = big endian = network order
                 console << bit << (++i%8 == 0 ? " " : "" ) << std::flush;
             },
             [&console](uint bit) -> void { /*console << "(E" << bit << ')';*/ } // todo: fix
