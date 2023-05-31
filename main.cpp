@@ -118,7 +118,6 @@ int main()
     );
 
     outFile.close();
-    cout << std::endl;
 #elif defined(TARGET_DUMPDECODE)
     cout << "read " << szAudio << " and print the decoded pattern as big endian bytes" << std::endl;
     std::ostream &console = cout; // lower cout into local context for use in lambda
@@ -178,9 +177,64 @@ int main()
     inFile.close();
     detailsFile.close();
 #elif defined(TARGET_ENCODE)
-    ;
+    cout << "encode stdin to " << szAudio << std::endl;
+    cout << "example: echo -n \"Hello World!\" | encode ; dumpdecode" << std::endl;
+    std::istream &console = cin; // lower into local context for use in lambda
+
+    // synthesis
+    ofstream outFile;
+    outFile.open(szAudio, ios::binary);
+
+    PSKOrange<element_cycles,carrier_cycles,freq,samplerate,MathUtil>::ElementEncoder encoder;
+    encoder.encode(
+        [&outFile](float v) { write_s16LE( outFile, v ); },
+        [&console](void) -> bool*
+        {
+            static uint i = 0; // todo: bit count might overflow for long messages
+            static bool bit = false;
+            static char byte = 0;
+
+            if (i%8 == 0)
+                if(!console.get(byte)) return nullptr;
+
+            // encode smallest bits first = big endian = network order
+            bit = (bool)(byte & (1 << i++%8));
+
+            return &bit;
+        }
+    );
+
+    outFile.close();
 #elif defined(TARGET_DECODE)
-    ;
+    cout << "read " << szAudio << " and print the decoded stream" << std::endl;
+    std::ostream &console = cout; // lower cout into local context for use in lambda
+
+    // read and decode
+    ifstream inFile;
+    inFile.open(szAudio, ios::binary);
+
+    PSKOrange<element_cycles,carrier_cycles,freq,samplerate,MathUtil>::ElementDecoder decoder;
+    decoder.decode(
+        [&inFile](void) -> float*
+        {
+            static float sample; // simple hack that allows us to signal end-of-stream
+            return inFile.eof() ? nullptr : &(sample = read_s16LE(inFile));
+        },
+        [&console](bool bit) -> void
+        {
+            static uint i = 0; // todo: bit count might overflow for long messages
+            static unsigned char byte = 0;
+
+            // when decoding smallest bits come first = big endian = network order
+            byte = (byte >> 1) | (bit?0b10000000:0);
+
+            if (++i%8 == 0)
+                console << byte << std::flush;
+        },
+        [&console](uint bit) -> void { /*console << "(E" << bit << ')';*/ } // todo: fix
+    );
+
+    inFile.close();
 #endif
     return 0;
 }
