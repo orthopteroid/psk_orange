@@ -118,6 +118,7 @@ int main()
     );
 
     outFile.close();
+    cout << std::endl;
 #elif defined(TARGET_DUMPDECODE)
     cout << "read " << szAudio << " and print the decoded pattern as big endian bytes" << std::endl;
     std::ostream &console = cout; // lower cout into local context for use in lambda
